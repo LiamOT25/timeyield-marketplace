@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>TimeYield Marketplace</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-gray-900 text-white font-sans">
+
+  <!-- Header -->
+  <header class="p-6 bg-gray-800 flex justify-between items-center shadow-md">
+    <h1 class="text-2xl font-bold text-white">TimeYield</h1>
+    <div>
+      <button onclick="logout()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded">Logout</button>
+    </div>
+  </header>
+
+  <!-- Main container -->
+  <main class="max-w-4xl mx-auto p-6 space-y-10">
+
+    <!-- Registration/Login -->
+    <section id="auth-section">
+      <h2 class="text-xl font-semibold">Create Account / Login</h2>
+      <input id="email" type="email" placeholder="Email" class="w-full p-2 mb-2 rounded text-black">
+      <input id="password" type="password" placeholder="Password" class="w-full p-2 mb-2 rounded text-black">
+      <select id="role" class="w-full p-2 mb-4 rounded text-black">
+        <option value="owner">Owner</option>
+        <option value="renter">Renter</option>
+      </select>
+      <button onclick="register()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded mr-2">Register</button>
+      <button onclick="login()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">Login</button>
+    </section>
+
+    <!-- Owner Dashboard -->
+    <section id="owner-section" class="hidden">
+      <h2 class="text-xl font-semibold">Your Watch Listings</h2>
+      <input id="watch-model" type="text" placeholder="Watch Model" class="w-full p-2 mb-2 rounded text-black">
+      <input id="watch-price" type="number" placeholder="Lease Price per Day (£)" class="w-full p-2 mb-2 rounded text-black">
+      <button onclick="createListing()" class="bg-teal-600 hover:bg-teal-700 px-4 py-2 rounded mb-4">Post Listing</button>
+      <ul id="watch-listings" class="space-y-2"></ul>
+    </section>
+
+    <!-- Renter Dashboard -->
+    <section id="renter-section" class="hidden">
+      <div id="kyc-status" class="mb-4 text-yellow-400 font-semibold">KYC Pending</div>
+      <button onclick="performKYC()" class="bg-indigo-500 hover:bg-indigo-600 px-4 py-2 rounded mb-6">Complete KYC Verification</button>
+      <h2 class="text-xl font-semibold">Available Watches</h2>
+      <ul id="available-watches" class="space-y-2"></ul>
+    </section>
+
+  </main>
+
+  <script>
+    // Initialize Firebase
+    const firebaseConfig = {
+      apiKey: "YOUR-API-KEY",
+      authDomain: "YOUR-PROJECT.firebaseapp.com",
+      projectId: "YOUR-PROJECT-ID",
+      storageBucket: "YOUR-PROJECT.appspot.com",
+      messagingSenderId: "SENDER-ID",
+      appId: "APP-ID"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // Auth Handlers
+    async function register() {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const role = document.getElementById('role').value;
+      const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+      await db.collection('users').doc(userCredential.user.uid).set({ role, kycVerified: false });
+    }
+
+    async function login() {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      await auth.signInWithEmailAndPassword(email, password);
+    }
+
+    async function logout() {
+      await auth.signOut();
+      location.reload();
+    }
+
+    auth.onAuthStateChanged(async user => {
+      if (!user) return;
+      document.getElementById('auth-section').style.display = 'none';
+      const userData = (await db.collection('users').doc(user.uid).get()).data();
+
+      if (userData.role === 'owner') {
+        document.getElementById('owner-section').style.display = 'block';
+        loadOwnerListings(user.uid);
+      } else {
+        document.getElementById('renter-section').style.display = 'block';
+        updateKYCStatus(userData.kycVerified);
+        loadAvailableWatches();
+      }
+    });
+
+    // Owner Listing
+    async function createListing() {
+      const model = document.getElementById('watch-model').value;
+      const price = parseFloat(document.getElementById('watch-price').value);
+      const uid = auth.currentUser.uid;
+      await db.collection('listings').add({ model, price, ownerId: uid });
+      loadOwnerListings(uid);
+    }
+
+    async function loadOwnerListings(uid) {
+      const list = document.getElementById('watch-listings');
+      list.innerHTML = '';
+      const query = await db.collection('listings').where('ownerId', '==', uid).get();
+      query.forEach(doc => {
+        const data = doc.data();
+        const li = document.createElement('li');
+        li.className = 'p-2 bg-gray-700 rounded';
+        li.textContent = `${data.model} – £${data.price}/day`;
+        list.appendChild(li);
+      });
+    }
+
+    // Renter View
+    async function loadAvailableWatches() {
+      const list = document.getElementById('available-watches');
+      list.innerHTML = '';
+      const query = await db.collection('listings').get();
+      query.forEach(doc => {
+        const data = doc.data();
+        const li = document.createElement('li');
+        li.className = 'p-2 bg-gray-700 rounded flex justify-between items-center';
+        li.innerHTML = `<span>${data.model} – £${data.price}/day</span>
+                        <button class="bg-green-500 px-3 py-1 rounded" onclick="alert('Lease request sent')">Request Lease</button>`;
+        list.appendChild(li);
+      });
+    }
+
+    // Simulated KYC
+    async function performKYC() {
+      const uid = auth.currentUser.uid;
+      // Simulate API call to Experian
+      setTimeout(async () => {
+        await db.collection('users').doc(uid).update({ kycVerified: true });
+        updateKYCStatus(true);
+        alert('KYC Verified!');
+      }, 1500);
+    }
+
+    function updateKYCStatus(verified) {
+      const status = document.getElementById('kyc-status');
+      status.textContent = verified ? '✅ KYC Verified' : '⚠️ KYC Pending';
+      status.className = verified ? 'text-green-400 font-semibold mb-4' : 'text-yellow-400 font-semibold mb-4';
+    }
+  </script>
+</body>
+</html>
